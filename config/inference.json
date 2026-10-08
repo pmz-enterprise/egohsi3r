@@ -1,0 +1,16 @@
+{
+  "project": "EgoHSI3R",
+  "paper": "https://openreview.net/forum?id=99H3txIB6n",
+  "weights": "https://www.modelscope.cn/models/QwenMaxPreview/egohsi3r",
+  "defaults": {
+    "model_path": "weights/egohsi3r.pth",
+    "size": 512,
+    "use_ttt3r": true,
+    "reset_interval": 20,
+    "hand_source": "detector"
+  },
+  "assets": {
+    "detector": "weights/detector.pt",
+    "mano_dir": "weights/mano"
+  }
+}
