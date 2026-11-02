@@ -556,10 +556,10 @@ class DPTPts3dPoseMANO(nn.Module):
 
         return [pose_out, shape_out, cam_out]
     
-    def forward(self, x, img_info, **kwargs): #这里考虑mask嘛？
+    def forward(self, x, img_info, **kwargs):
         if self.has_pose:
             pose_token = x[-1][:, 0].clone()
-            n_humans_i = kwargs.get("n_humans") #这里一定是36
+            n_humans_i = kwargs.get("n_humans")
             token = x[-1][:, 1:]
 
             with torch.cuda.amp.autocast(enabled=False):

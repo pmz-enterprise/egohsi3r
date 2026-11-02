@@ -86,7 +86,7 @@ def strip_module(state_dict):
         new_state_dict[name] = v
     return new_state_dict
 
-# todo : 改为wilor的load
+
 def strip_module_mhmr(state_dict):
     """
     Load Multi-HMR pretrained model
@@ -355,17 +355,17 @@ class ARCroco3DStereo(CroCoNet):
         )
 
 
-        #此处已添加新的token
+
         # self.masked_smpl_token = nn.Parameter(
         #     torch.randn(1, self.enc_embed_dim) * 0.02, requires_grad=True
-        # ) #此处learnable token
+
 
         self.masked_query_token = nn.Parameter(
             torch.randn(1, 768) * 0.02, requires_grad=True
         )
         self.mhmr_masked_img_token = nn.Parameter(
             torch.randn(1, 1280) * 0.02, requires_grad=True
-        )#这个貌似没什么用
+        )
 
         self.hand_backbone = ViT(
                 img_size=(256, 192),
@@ -386,14 +386,12 @@ class ARCroco3DStereo(CroCoNet):
             rois: Bx5 boxes. First column is the index into N. The other 4 columns are xyxy.
         """
         self.prompt_builder = HandPromptBuilder()
-        """
-        输入:
+        """Inputs:
             f_scene: [B, C, H, W] (e.g., [B, 1024, 7, 7])
             f_prior: [B, 18, 1280]
             is_left_idx: [B] (0=Right, 1=Left)
-        输出:
-            prompt_query: [B, 18, embed_dim]
-        """
+        Outputs:
+            prompt_query: [B, 18, embed_dim]"""
 
         self.contact_head_enabled = bool(config.contact_head)
         if self.contact_head_enabled:
@@ -910,7 +908,7 @@ class ARCroco3DStereo(CroCoNet):
             hand_full_out.shape[1],
             hand_full_out.shape[2],
         )
-        #到这里结束 #以上有很多不必要操作，因为img_mask一定是true
+
         ray_maps = ray_maps.permute(0, 3, 1, 2)  # Change shape to (N, C, H, W)
         selected_ray_maps = ray_maps[ray_masks_flat]
         selected_shapes_ray = shapes[ray_masks_flat]
@@ -1061,9 +1059,7 @@ class ARCroco3DStereo(CroCoNet):
 
 
     def process_hand_features(self, feat_list, hand_feat, views):
-        """
-        极致优化版处理函数：利用 Mask 预先过滤空手，避免无效的计算开销。
-        """
+        """Filter invalid hands with the mask before computing hand features."""
         V = len(feat_list)
         bs = feat_list[0].shape[0]
         patch_size = self.croco_args['patch_size']
@@ -1071,7 +1067,7 @@ class ARCroco3DStereo(CroCoNet):
         dtype = feat_list[0].dtype
 
         # ==========================================
-        # 1. 堆叠并合并 V 和 bs 维度
+
         # ==========================================
         detach_scene = getattr(self, "detach_scene_for_hand", True)
         feat = torch.stack([f.detach() if detach_scene else f for f in feat_list], dim=0)
@@ -1084,33 +1080,33 @@ class ARCroco3DStereo(CroCoNet):
         n_patches, D = hand_feat.shape[-2], hand_feat.shape[-1]
         hfeat = hand_feat.view(V * bs, NUM_HANDS, n_patches, D)
 
-        # 将图片特征恢复为 2D 空间特征供 ROIAlign 使用
+
         nH,nW = views[0]["true_shape"][0] // patch_size
         feat_spatial = feat.transpose(1, 2).reshape(
             V * bs, self.enc_embed_dim, nH.item(), nW.item()
         )
         # ==========================================
-        # 2. 预先构建包含 masked_query_token 的输出张量
+
         # ==========================================
-        # 获取占位符并保证数据类型正确。假设其 token 维度大小为 embed_dim (如 768)
+
         masked_token = self.masked_query_token.to(device=device, dtype=dtype)
         embed_dim = masked_token.shape[-1]
         
-        # 预先铺满所有的占位 token (V * bs * 2 只手)
-        # 利用 expand 和 clone 避免循环赋值，这是最高效的初始填充方式
+
+
         full_prompts = masked_token.view(1, 1, embed_dim).expand(
             V * bs * NUM_HANDS, HAND_TOKENS_PER_HAND, embed_dim
         ).clone()
 
         # ==========================================
-        # 3. 获取有效的 Mask 索引 (Filter)
+
         # ==========================================
         flat_mask = mask.view(-1) # [V * bs * 2]
-        valid_idx = flat_mask.nonzero(as_tuple=True)[0] # 获取值为 True 的位置索引
-        # 如果当前 batch 中存在有效的手，才执行重计算
+        valid_idx = flat_mask.nonzero(as_tuple=True)[0]
+
         if valid_idx.numel() > 0:
-            # 对应到 feat_spatial 的 batch index 是 valid_idx // 2
-            # ROIAlign 要求的 rois 第一列是 float 类型的 batch 索引
+
+
             valid_batch_idx = (valid_idx // NUM_HANDS).unsqueeze(1).to(dtype)
             
             flat_bbox = bbox.view(V * bs * NUM_HANDS, 4)
@@ -1123,12 +1119,12 @@ class ARCroco3DStereo(CroCoNet):
             flat_hfeat = hfeat.view(V * bs * NUM_HANDS, n_patches, D)
             valid_f_prior = flat_hfeat[valid_idx]
             
-            # 巧妙利用奇偶性判断左右手 (0=Right, 1=Left)
-            # 展平后的顺序恒为右、左、右、左...，因此直接模 2 即可
+
+
             valid_is_left = (valid_idx % NUM_HANDS).long()
 
             # ==========================================
-            # 4. 仅对有效 Hand 执行重计算 (Heavy Compute)
+
             # ==========================================
             valid_roi_out = self.roi(feat_spatial, valid_rois)
             valid_prompt = self.prompt_builder(f_scene=valid_roi_out, 
@@ -1136,13 +1132,13 @@ class ARCroco3DStereo(CroCoNet):
                                             is_left_idx=valid_is_left)
             
             # ==========================================
-            # 5. Scatter 填入预定义好的结果张量中
+
             # ==========================================
             full_prompts[valid_idx] = valid_prompt
 
         # ==========================================
-        # 6. 计算 Patch UV 坐标 (hand_pos)
-        # 简单算术计算非常轻量级，无需掩码直接全量计算即可
+
+
         # ==========================================
         cx = (bbox[..., 0] + bbox[..., 2]) / 2.0  # [V, bs, 2]
         cy = (bbox[..., 1] + bbox[..., 3]) / 2.0  # [V, bs, 2]
@@ -1157,7 +1153,7 @@ class ARCroco3DStereo(CroCoNet):
         hand_poses = list(
             hand_pos_flat.reshape(V, bs, NUM_HAND_TOKENS, 2).unbind(dim=0)
         )
-        # 直接 view 成 [V, bs, 36, embed_dim]
+
         prompt_queries = list(
             full_prompts.reshape(V, bs, NUM_HAND_TOKENS, embed_dim).unbind(dim=0)
         )
@@ -1360,12 +1356,12 @@ class ARCroco3DStereo(CroCoNet):
             ).clone()
 
             n_patches, D = hand_full_out.shape[-2], hand_full_out.shape[-1]
-            valid_idx = mano_mask_flat.nonzero(as_tuple=True)[0] # 获取值为 True 的位置索引
+            valid_idx = mano_mask_flat.nonzero(as_tuple=True)[0]
             bbox = view['bbox']
-            # 如果当前 batch 中存在有效的手，才执行重计算
+
             if valid_idx.numel() > 0:
-                # 对应到 feat_spatial 的 batch index 是 valid_idx // 2
-                # ROIAlign 要求的 rois 第一列是 float 类型的 batch 索引
+
+
                 valid_batch_idx = (valid_idx // NUM_HANDS).unsqueeze(1)
                 
                 flat_bbox = bbox.view(batch_size * NUM_HANDS, 4)
@@ -1381,12 +1377,12 @@ class ARCroco3DStereo(CroCoNet):
                 )
                 valid_f_prior = flat_hfeat[valid_idx]
                 
-                # 巧妙利用奇偶性判断左右手 (0=Right, 1=Left)
-                # 展平后的顺序恒为右、左、右、左...，因此直接模 2 即可
+
+
                 valid_is_left = (valid_idx % NUM_HANDS).long()
 
                 # ==========================================
-                # 4. 仅对有效 Hand 执行重计算 (Heavy Compute)
+
                 # ==========================================
                 valid_roi_out = self.roi(feat_spatial, valid_rois)
                 valid_prompt = self.prompt_builder(f_scene=valid_roi_out, 
@@ -1394,13 +1390,13 @@ class ARCroco3DStereo(CroCoNet):
                                                 is_left_idx=valid_is_left)
                 
                 # ==========================================
-                # 5. Scatter 填入预定义好的结果张量中
+
                 # ==========================================
                 full_prompts[valid_idx] = valid_prompt
 
             # ==========================================
-            # 6. 计算 Patch UV 坐标 (hand_pos)
-            # 简单算术计算非常轻量级，无需掩码直接全量计算即可
+
+
             # ==========================================
             cx = (bbox[..., 0] + bbox[..., 2]) / 2.0  # [V, bs, 2]
             cy = (bbox[..., 1] + bbox[..., 3]) / 2.0  # [V, bs, 2]

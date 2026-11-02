@@ -2,6 +2,7 @@
 import threading
 import time
 
+import cv2
 import numpy as np
 import trimesh
 import viser
@@ -9,6 +10,8 @@ import viser.transforms as vtf
 
 
 VIEW_MODES = ("Hybrid", "3D", "4D", "Accumulate")
+CAMERA_HISTORY_COLOR = (130, 140, 220)
+CAMERA_CURRENT_COLOR = (245, 155, 125)
 
 
 def visible_frame_indices(mode, current, count, accumulate_start=0):
@@ -53,6 +56,39 @@ def contact_mesh_glb(vertices, faces, colors, opacity=1.0):
     return trimesh.exchange.gltf.export_glb(trimesh.Scene(mesh), tree_postprocessor=material)
 
 
+def contact_vertices(frame, side, threshold, coordinates="world"):
+    """Select finite, visible-hand predictions without changing their probabilities."""
+    probabilities = frame.get("contact_probability")
+    vertices = frame[f"vertices_{coordinates}"][side]
+    if probabilities is None or not frame["hand_mask"][side]:
+        return vertices[:0], np.empty(0, dtype=np.float32)
+    probability = np.asarray(probabilities[side])
+    valid = np.isfinite(probability) & (probability >= threshold) & np.isfinite(vertices).all(axis=-1)
+    return vertices[valid], probability[valid]
+
+
+def contact_projection(frame, threshold):
+    """Project contact vertices onto RGB, including predictions on the occluded side."""
+    image = frame["rgb"].copy()
+    height, width = image.shape[:2]
+    pixels = []
+    for side in range(2):
+        points, _ = contact_vertices(frame, side, threshold, "camera")
+        points = points[points[:, 2] > 1e-6]
+        projected = points @ frame["intrinsics"].T
+        if len(projected):
+            xy = projected[:, :2] / projected[:, 2:]
+            xy = xy[np.isfinite(xy).all(axis=-1)]
+            xy = xy[(xy[:, 0] >= 0) & (xy[:, 0] < width) & (xy[:, 1] >= 0) & (xy[:, 1] < height)]
+            pixels.extend(np.rint(xy).astype(int))
+    # Draw borders first so neighboring markers form a single readable region.
+    for x, y in pixels:
+        cv2.circle(image, (int(x), int(y)), 3, (0, 0, 0), -1)
+    for x, y in pixels:
+        cv2.circle(image, (int(x), int(y)), 1, (100, 255, 0), -1)
+    return image
+
+
 class Hand3RSequenceViewer:
     def __init__(self, frames, faces, args, fps, color_fn, server=None):
         if not frames:
@@ -65,6 +101,8 @@ class Hand3RSequenceViewer:
         self.lock = threading.RLock()
         self.clouds, self.meshes, self.mesh_styles, self.cameras = {}, {}, {}, {}
         self.current_camera = self.trajectory = None
+        self.contact_markers = {}
+        self._contact_signature = None
         self._trajectory_range = None
         self._cloud_signature = None
         self.positions = np.stack([f["camera_to_world"][:3, 3] for f in frames])
@@ -114,6 +152,8 @@ class Hand3RSequenceViewer:
                                                min=1, max=max(200, len(self.frames)), step=1)
             self.camera_size = gui.add_slider("Camera size", min=0.005, max=0.5, step=0.005,
                                              initial_value=self.args.camera_size)
+            self.camera_brightness = gui.add_slider("Camera brightness", min=0.2, max=1.0,
+                                                   step=0.05, initial_value=0.7)
             self.camera_image = gui.add_checkbox("Camera image", initial_value=False)
             self.follow = gui.add_checkbox("Follow camera", initial_value=self.args.follow_camera)
             self.fit_scene_button = gui.add_button("Fit scene", icon="focus-centered")
@@ -127,6 +167,17 @@ class Hand3RSequenceViewer:
                                                 initial_value=self.args.contact_mode)
             self.contact_threshold = gui.add_slider("Contact threshold", min=0, max=1, step=0.01,
                                                     initial_value=self.args.contact_threshold)
+            gui.add_markdown("**Neon green = predicted contact** above the threshold. "
+                             "Cyan = right hand; magenta = left hand. "
+                             "`probability` shows a continuous blend; `binary` shows a clear cutoff.")
+            self.show_contact_points = gui.add_checkbox("Contact markers", initial_value=True)
+            self.contact_point_size = gui.add_slider("Contact marker size", min=0.001, max=0.02,
+                                                     step=0.001, initial_value=0.006)
+            self.next_contact = gui.add_button("Next contact", icon="chevron-right")
+            self.contact_status = gui.add_markdown("")
+            self.show_contact_image = gui.add_checkbox("Contact on RGB", initial_value=True)
+            gui.add_markdown("RGB markers also show predictions on the occluded side of the hand.")
+            self.contact_image = gui.add_image(self.frames[0]["rgb"], label="Projected contact")
             self.opacity = gui.add_slider("Mesh opacity", min=0, max=1, step=0.05, initial_value=1.0)
             self.fade = gui.add_dropdown("History opacity", options=("None", "By time", "Age"), initial_value="None")
             self.min_opacity = gui.add_slider("Minimum opacity", min=0, max=1, step=0.05, initial_value=0.1)
@@ -134,19 +185,22 @@ class Hand3RSequenceViewer:
         for control in (self.frame, self.show_scene, self.scene_stride, self.show_cameras,
                         self.show_trajectory, self.camera_image, self.show_hands, self.hand_stride,
                         self.contact_mode, self.contact_threshold, self.opacity, self.fade,
-                        self.min_opacity, self.decay, self.follow):
+                        self.min_opacity, self.decay, self.follow, self.show_contact_points,
+                        self.contact_point_size, self.show_contact_image):
             control.on_update(self.update)
-        # 切换模式时，相机采样的起点可能发生变化，因此重新创建相机。
+
         self.mode.on_update(self.rebuild_cameras)
-        # 修改累计起始帧时，也要从新的起点重新创建相机。
+
         self.accumulate_start.on_update(self.rebuild_cameras)
         self.confidence.on_update(self.rebuild_clouds)
         self.point_stride.on_update(self.rebuild_clouds)
         self.point_size.on_update(self.update_point_size)
         self.camera_stride.on_update(self.rebuild_cameras)
         self.camera_size.on_update(self.update_camera_size)
+        self.camera_brightness.on_update(self.update_camera_colors)
         self.previous.on_click(lambda _: self.step(-1))
         self.next.on_click(lambda _: self.step(1))
+        self.next_contact.on_click(self.jump_to_contact)
         self.fit_scene_button.on_click(lambda event: self.fit_clients(event, hands=False))
         self.fit_hands_button.on_click(lambda event: self.fit_clients(event, hands=True))
         self.reset_up_button.on_click(self.reset_up)
@@ -161,6 +215,52 @@ class Hand3RSequenceViewer:
         span = len(self.frames) - start
         current = max(self.current, start)
         self.frame.value = start + (current - start + delta) % span
+
+    def jump_to_contact(self, _=None):
+        for offset in range(1, len(self.frames)):
+            index = (self.current + offset) % len(self.frames)
+            if any(len(contact_vertices(self.frames[index], side, self.contact_threshold.value)[0])
+                   for side in range(2)):
+                self.playing.value = False
+                self.frame.value = index
+                return
+        self.contact_status.content = "No other frame has predicted contact above this threshold."
+
+    def update_contacts(self):
+        frame = self.frames[self.current]
+        threshold = float(self.contact_threshold.value)
+        enabled = self.show_hands.value and self.contact_mode.value != "off"
+        signature = (self.current, threshold, enabled, self.show_contact_points.value,
+                     float(self.contact_point_size.value), self.show_contact_image.value)
+        if signature == self._contact_signature:
+            return
+        for handle in self.contact_markers.values():
+            handle.remove()
+        self.contact_markers.clear()
+        lines = [f"**Frame {self.current} · predicted contact ≥ {threshold:.2f}**"]
+        for side, name in enumerate(("Right", "Left")):
+            points, _ = contact_vertices(frame, side, threshold)
+            probability = frame.get("contact_probability")
+            if not frame["hand_mask"][side]:
+                lines.append(f"{name}: hand not detected")
+            elif probability is None:
+                lines.append(f"{name}: contact predictions unavailable")
+            else:
+                finite = probability[side][np.isfinite(probability[side])]
+                peak = f"{finite.max():.3f}" if len(finite) else "unavailable"
+                lines.append(f"{name}: {len(points)} / {len(probability[side])} vertices; max probability {peak}")
+            if enabled and self.show_contact_points.value and len(points):
+                self.contact_markers[side] = self.server.scene.add_point_cloud(
+                    f"/contact/current/{side}/points", points=np.ascontiguousarray(points, dtype=np.float32),
+                    colors=(100, 255, 0), point_size=self.contact_point_size.value,
+                    point_shape="circle", point_shading="flat")
+        if not enabled:
+            lines.append("Contact display hidden; enable hands and select binary or probability.")
+        self.contact_status.content = "\n\n".join(lines)
+        self.contact_image.visible = bool(enabled and self.show_contact_image.value)
+        if self.contact_image.visible:
+            self.contact_image.image = contact_projection(frame, threshold)
+        self._contact_signature = signature
 
     def rebuild_clouds(self, _=None):
         with self.lock, self.server.atomic():
@@ -191,6 +291,19 @@ class Hand3RSequenceViewer:
         return dict(fov=float(2 * np.arctan(height / (2 * k[1, 1]))), aspect=width / height,
                     position=pose[:3, 3], wxyz=vtf.SO3.from_matrix(pose[:3, :3]).wxyz)
 
+    def camera_color(self, color):
+        return tuple(int(round(channel * self.camera_brightness.value)) for channel in color)
+
+    def update_camera_colors(self, _=None):
+        with self.lock, self.server.atomic():
+            for handle in self.cameras.values():
+                handle.color = self.camera_color(CAMERA_HISTORY_COLOR)
+            if self.current_camera is not None:
+                self.current_camera.color = self.camera_color(CAMERA_CURRENT_COLOR)
+            if self.trajectory is not None:
+                self.trajectory.colors = np.full_like(
+                    self.trajectory.colors, self.camera_color(CAMERA_HISTORY_COLOR))
+
     def rebuild_cameras(self, _=None):
         with self.lock, self.server.atomic():
             for handle in self.cameras.values():
@@ -207,16 +320,13 @@ class Hand3RSequenceViewer:
             )
             indices.add(len(self.frames) - 1)
             for i in sorted(indices):
-                ratio = i / max(1, len(self.frames) - 1)
-                color = tuple((np.array([45, 135, 210]) * (1 - ratio)
-                               + np.array([220, 155, 50]) * ratio).astype(np.uint8))
                 self.cameras[i] = self.server.scene.add_camera_frustum(
                     f"/cameras/history/{i}", **self.camera_parameters(i), scale=self.camera_size.value,
-                    color=color, thickness=1.2, thickness_units="screen", visible=False)
+                    color=self.camera_color(CAMERA_HISTORY_COLOR), thickness=2.0, thickness_units="screen", visible=False)
             if self.current_camera is None:
                 self.current_camera = self.server.scene.add_camera_frustum(
                     "/cameras/current", **self.camera_parameters(self.current), scale=self.camera_size.value,
-                    color=(245, 75, 60), thickness=2.5, thickness_units="screen")
+                    color=self.camera_color(CAMERA_CURRENT_COLOR), thickness=4.0, thickness_units="screen")
             self.update()
 
     def update_camera_size(self, _=None):
@@ -279,6 +389,7 @@ class Hand3RSequenceViewer:
                 handle.visible = (self.show_scene.value and i in scene_indices
                                   and ((i - anchor) % stride == 0 or i == self.current))
             self.update_meshes(hand_indices, anchor)
+            self.update_contacts()
             for i, handle in self.cameras.items():
                 handle.visible = (self.show_cameras.value and not self.follow.value and self.mode.value != "4D"
                                   and i in scene_indices and i != self.current)
@@ -308,8 +419,8 @@ class Hand3RSequenceViewer:
                     self.trajectory = self.server.scene.add_line_segments(
                         "/cameras/trajectory",
                         points=segments,
-                        colors=(50, 160, 175),
-                        thickness=2,
+                        colors=self.camera_color(CAMERA_HISTORY_COLOR),
+                        thickness=3,
                         thickness_units="screen",
                     )
 
@@ -337,7 +448,8 @@ class Hand3RSequenceViewer:
         else:
             # Bound the fitting sample, not the displayed scene.
             for i in range(0, len(self.frames), max(1, len(self.frames) // 32)):
-                sampled, _ = filtered_cloud(self.frames[i], self.confidence.value, max(1, int(self.point_stride.value)))
+                sampled, _ = filtered_cloud(self.frames[i], self.confidence.value,
+                                            max(1, int(self.point_stride.value)))
                 points.append(sampled[::max(1, len(sampled) // 2000)])
         points = np.concatenate(points, axis=0) if points else self.positions
         points = points[np.isfinite(points).all(axis=-1)]

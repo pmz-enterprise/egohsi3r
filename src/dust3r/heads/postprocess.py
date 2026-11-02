@@ -68,7 +68,7 @@ def postprocess_pose(out, mode, inverse=False):
     return torch.cat([trans, quats], dim=-1)
 
 
-def postprocess_smpl(out, mode, pos_z=False, naive_mode=False):#pose_z是false
+def postprocess_smpl(out, mode, pos_z=False, naive_mode=False):
     """
     extract SMPL parameters from prediction head output
     """
@@ -90,7 +90,7 @@ def postprocess_smpl(out, mode, pos_z=False, naive_mode=False):#pose_z是false
     return res
 
 
-def postprocess_mano(out, mode, pos_z=False, naive_mode=False):#pose_z是false
+def postprocess_mano(out, mode, pos_z=False, naive_mode=False):
     pred_mano_pose, pred_betas, pred_cam = out
     bs, max_hands = pred_mano_pose.shape[:2]
     res = dict(mano_shape=pred_betas)

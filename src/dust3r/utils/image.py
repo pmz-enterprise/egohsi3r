@@ -528,10 +528,8 @@ def log_optimal_transport(scores: torch.Tensor, alpha: torch.Tensor, iters: int)
 
 
 def load_images_new(folder_path, verbose=True):
-    """
-    加载文件夹中的图片，调整为 512x384，并保存到 folder_resized
-    """
-    # 1. 强制检查输入必须是文件夹
+    """Load images from a folder, resize them to 512x384, and save to folder_resized."""
+
     if not isinstance(folder_path, str) or not os.path.isdir(folder_path):
         raise ValueError(f"输入必须是有效的文件夹路径: {folder_path}")
 
@@ -541,10 +539,10 @@ def load_images_new(folder_path, verbose=True):
     root = folder_path
     folder_content = sorted(os.listdir(folder_path))
 
-    # 2. 定义目标分辨率
+
     TARGET_W, TARGET_H = 512, 384
     
-    # 3. 定义输出文件夹并创建
+
     output_folder = os.path.join(folder_path, "folder_resized")
     os.makedirs(output_folder, exist_ok=True)
 
@@ -557,7 +555,7 @@ def load_images_new(folder_path, verbose=True):
             
         img_path = os.path.join(root, path)
         
-        # 打开并转换图片
+
         try:
             img = exif_transpose(PIL.Image.open(img_path)).convert("RGB")
         except Exception as e:
@@ -566,27 +564,27 @@ def load_images_new(folder_path, verbose=True):
 
         W1, H1 = img.size
         
-        # --- 核心修改：调整为 512x384 的逻辑 ---
+
         
-        # 第一步：缩放。
-        # 为了确保能覆盖 512x384 的区域以便进行中心裁剪，
-        # 我们先计算缩放比例，让短边至少达到目标尺寸。
-        # 这里采用一种通用的“填充风格”缩放策略：
-        # 先缩放到能包含 512x384 的大小，或者直接缩放到目标大小然后裁剪。
+
+
+
+
+
         
-        # 策略：先缩放到目标大小 (512, 384)，这可能会改变长宽比，
-        # 但紧接着我们进行中心裁剪来确保输出绝对是 512x384。
-        # 为了最佳效果，通常先缩放到长边匹配，再裁剪。
+
+
+
         
-        # 计算缩放比例，使图片能覆盖 512x384 的区域
+
         scale_ratio = max(TARGET_W / W1, TARGET_H / H1)
         new_w = int(W1 * scale_ratio)
         new_h = int(H1 * scale_ratio)
         
-        # 使用 LANCZOS 进行高质量缩放
+
         img_resized = img.resize((new_w, new_h), PIL.Image.LANCZOS)
         
-        # 第二步：中心裁剪到 512x384
+
         w, h = img_resized.size
         left = (w - TARGET_W) // 2
         top = (h - TARGET_H) // 2
@@ -595,17 +593,17 @@ def load_images_new(folder_path, verbose=True):
         
         img_cropped = img_resized.crop((left, top, right, bottom))
         
-        # 更新尺寸变量
-        W2, H2 = img_cropped.size # 应该是 512, 384
 
-        # --- 保存修改后的图片 ---
+        W2, H2 = img_cropped.size
+
+
         save_path = os.path.join(output_folder, path)
         img_cropped.save(save_path)
 
         if verbose:
             print(f" - Processed {path}: {W1}x{H1} --> {W2}x{H2} (Saved to folder_resized)")
 
-        # --- 组装返回数据 (保持原有 DUSt3R 格式) ---
+
         imgs.append(
             dict(
                 img=ImgNorm(img_cropped)[None],

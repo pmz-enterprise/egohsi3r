@@ -108,53 +108,44 @@ class MANOModel(object):
                         imgs: torch.Tensor, 
                         bbox: torch.Tensor, 
                         mano_mask: torch.Tensor) -> torch.Tensor:
-        """
-        根据 bbox 裁剪左右手并缩放到指定大小，保持两侧原始像素方向。
-        处理了 mano_mask=False 时 bbox=[0,0,0,0] 的情况。
-        
-        参数:
-            imgs: [N, 3, 384, 512] - 原始图像 (N = num_views * B)
-            bbox: [N, 2, 4] - 边界框 [x1, y1, x2, y2]
-            mano_mask: [N, 2] - 表示手是否有效
+        """Crop and resize both hands from bounding boxes, preserving pixel orientation.
+        Handles zero bounding boxes for invalid hands.
 
-        # mano_mask [num_views X B, 2] 手是否有效
-        # bbox [num_views X B, 2, 4]
-        # imgs [num_views X B, 3, 384, 512]
-        # output
-        # resized_crop [num_views X B, 2, 3, 256, 192]
-        # 每个 0 号为右手，1 号为左手
-            
-        返回:
-            resized_crop: [N, 2, 3, 256, 192]
-        """
+        Args:
+            imgs: [N, 3, 384, 512], where N = num_views * B.
+            bbox: [N, 2, 4] in [x1, y1, x2, y2] format.
+            mano_mask: [N, 2] indicating valid hands; 0=right, 1=left.
+        
+        Returns:
+            resized_crop: [N, 2, 3, 256, 192]."""
         N = imgs.shape[0]
         device = imgs.device
         dtype = imgs.dtype
         
-        # 1. 安全处理无效的 bbox
-        # 确保 mano_mask 是布尔类型
+
+
         mask_bool = mano_mask.bool() 
-        # 扩展 mask 形状为 [N, 2, 1] 以利用广播匹配 bbox 的 [N, 2, 4]
+
         mask_expanded = mask_bool.unsqueeze(-1) 
         
-        # 构建一个安全的 Dummy Box [0, 0, 1, 1]
+
         dummy_box = torch.tensor([0.0, 0.0, 1.0, 1.0], device=device, dtype=bbox.dtype)
         
-        # 如果有效，使用真实的 bbox；如果无效，使用 dummy_box 防止 roi_align 报错
+
         safe_bbox = torch.where(mask_expanded, bbox, dummy_box)
         
-        # 2. 构造 rois 张量: 格式为 [batch_index, x1, y1, x2, y2]
+
         batch_idx = torch.arange(N, device=device, dtype=bbox.dtype).view(N, 1, 1).expand(N, 2, 1)
         rois = torch.cat([batch_idx, safe_bbox], dim=-1).view(-1, 5)
         rois = rois.to(torch.float32)
-        # 3. 执行批量裁剪和缩放 (Crop and Resize)
+
         crops = ops.roi_align(imgs, rois, output_size=(256, 192), spatial_scale=1.0, aligned=True)
         
-        # 4. 重新塑形为 [N, 2, 3, 256, 192]
+
         resized_crop = crops.view(N, 2, 3, 256, 192)
         
-        # 5. 使用 mano_mask 彻底清理无效手的数据
-        # 刚刚用 dummy_box 截取到的无意义图像像素，在这里被严格置为 0
+
+
         mask_final = mask_bool.view(N, 2, 1, 1, 1).to(dtype)
         resized_crop = resized_crop * mask_final
 
@@ -181,7 +172,7 @@ class MANOModel(object):
         })
         
         return out
-                    # 输入
+
                     # mano_mask=mano_mask, [2]
                     # bbox = bbox, [2,4]
                     # theta = theta, [2,48]
@@ -190,7 +181,7 @@ class MANOModel(object):
 
 
 
-                    #目标： 
+
 # "resized_crop" #
 # mano_rotmat
 # mano_shape

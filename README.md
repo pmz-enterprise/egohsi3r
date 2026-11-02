@@ -1,7 +1,7 @@
 <h1 align="center">EgoHSI3R: Online 4D Hand-Scene Interaction Reconstruction from Egocentric Video</h1>
 
 <p align="center">
-  <a href="https://openreview.net/forum?id=99H3txIB6n"><img src="https://img.shields.io/badge/Paper-OpenReview-b31b1b" alt="Paper"></a>
+  <a href="https://arxiv.org/abs/2610.40832"><img src="https://img.shields.io/badge/Paper-arXiv-b31b1b" alt="Paper"></a>
   <a href="https://www.modelscope.cn/models/QwenMaxPreview/egohsi3r"><img src="https://img.shields.io/badge/Weights-ModelScope-624aff" alt="Model weights"></a>
 </p>
 
@@ -50,20 +50,33 @@ wget -O weights/mano/mano_mean_params.npz https://raw.githubusercontent.com/rolp
 
 ## Inference
 
-Provide a video or image directory. Results are saved to `outputs/demo`;
-the viewer runs at `http://127.0.0.1:8080`.
+Run the included demo video. Results are saved to `outputs/demos/demo`;
+the viewer runs at `http://127.0.0.1:8081`.
 
 ```bash
-python infer.py --seq_path /path/to/video.mp4 --save
+python infer.py --seq_path demos/demo.mp4 --save --output_dir outputs/demos/demo --port 8081
 ```
 
 Replay saved results:
 
 ```bash
-python infer.py --results_dir outputs/demo
+python infer.py --results_dir outputs/demos/demo --port 8081
 ```
 
 Use `--no_viewer` for headless execution. See `python infer.py --help` for options.
+Hand meshes use bright cyan (right) and bright magenta (left). Contact defaults
+to `binary`: vertices at or above the threshold (default `0.5`) turn neon green.
+`probability` blends the side color toward neon green as probability increases;
+`off` shows solid side colors and hides contact markers.
+
+In **Hands / Contact**, neon green **Contact markers** emphasize current-frame contact
+vertices. **Contact on RGB** projects the
+same vertices onto the input image, including the occluded side of the hand.
+The readout shows counts and maximum probabilities for each hand. **Next contact**
+jumps to the next frame with a vertex above the selected threshold. These are
+model predictions on hand vertices, not measured object contact or contact force.
+Use `--bbox_padding` to adjust the margin around detected hands (default: `0.25`
+per side, giving 1.5× width and height before aspect-ratio and boundary adjustment).
 
 ## Acknowledgements
 
@@ -72,3 +85,19 @@ Built on [CUT3R](https://github.com/CUT3R/CUT3R),
 [WiLoR](https://github.com/rolpotamias/WiLoR), and
 [TTT3R](https://github.com/Inception3D/TTT3R).
 Third-party code and assets retain their original licenses.
+
+## Citation
+
+If you find this work useful, please cite:
+
+```bibtex
+@misc{egohsi3r,
+  title={EgoHSI3R: Online 4D Hand-Scene Interaction Reconstruction from Egocentric Video},
+  author={Mingzhi Pei and Zhangchen Ye and Ruoqu Chen and Liu Cao and Mengdi Xu},
+  year={2026},
+  eprint={2610.40832},
+  archivePrefix={arXiv},
+  primaryClass={cs.CV},
+  url={https://arxiv.org/abs/2610.40832}
+}
+```

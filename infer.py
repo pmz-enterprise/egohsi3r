@@ -49,23 +49,25 @@ def parse_args(argv=None):
     parser.add_argument("--no_viewer", action="store_true")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--vis_threshold", type=float, default=1.5)
-    parser.add_argument("--downsample_factor", type=int, default=4)
-    parser.add_argument("--viewer_mode", choices=("Hybrid", "3D", "4D", "Accumulate"), default="Hybrid")
-    parser.add_argument("--point_size", type=float, default=0.003)
+    parser.add_argument("--vis_threshold", type=float, default=2.0)
+    parser.add_argument("--downsample_factor", type=int, default=6)
+    parser.add_argument("--viewer_mode", choices=("Hybrid", "3D", "4D", "Accumulate"), default="3D")
+    parser.add_argument("--point_size", type=float, default=0.0001)
     parser.add_argument("--camera_size", type=float, default=0.05)
-    parser.add_argument("--camera_downsample", type=int, default=1)
-    parser.add_argument("--smpl_downsample", "--hand_downsample", type=int, default=1,
+    parser.add_argument("--camera_downsample", type=int, default=20)
+    parser.add_argument("--smpl_downsample", "--hand_downsample", type=int, default=20,
                         help="Historical hand mesh frame stride in the viewer.")
     parser.add_argument("--follow_camera", action="store_true",
                         help="Follow the reconstructed camera with the browser viewpoint.")
-    parser.add_argument("--contact_mode", choices=("probability", "binary", "off"), default="probability")
+    parser.add_argument("--contact_mode", choices=("probability", "binary", "off"), default="binary")
     parser.add_argument("--contact_threshold", type=float, default=0.5)
     parser.add_argument("--hand_source", choices=("detector", "annotations"), default="detector",
                         help="annotations uses exported boxes/masks/intrinsics, never GT hand poses.")
     parser.add_argument("--detector_path", default=os.environ.get(
         "HAND3R_DETECTOR_PATH", str(ROOT / "weights/detector.pt")))
     parser.add_argument("--detector_conf", type=float, default=0.25)
+    parser.add_argument("--bbox_padding", type=float, default=0.25,
+                        help="Padding per side relative to detector box size (default: 0.25).")
     parser.add_argument("--track", action="store_true", help="Enable ByteTrack (requires lap).")
     args = parser.parse_args(argv)
     if args.results_dir:
@@ -92,6 +94,8 @@ def parse_args(argv=None):
         parser.error("--fps must be finite and positive")
     if not 0 <= args.contact_threshold <= 1 or not 0 <= args.detector_conf <= 1:
         parser.error("Contact and detector thresholds must be in [0, 1]")
+    if not np.isfinite(args.bbox_padding) or args.bbox_padding < 0:
+        parser.error("--bbox_padding must be finite and nonnegative")
     if not 1 <= args.port <= 65535:
         parser.error("Invalid viewer port")
     return args
@@ -241,7 +245,7 @@ def prepare_input(selected, args, temporary_dir):
                                  tracker="bytetrack.yaml" if args.track else None)
         masks, boxes = parse_tracks(tracks, num_frames=len(images),
                                    img_h=images[0].shape[-2], img_w=images[0].shape[-1],
-                                   max_gap=5, smooth_window=3)
+                                   padding=args.bbox_padding, max_gap=5, smooth_window=3)
     views, hand_count = [], 0
     for i, (image, box, mask) in enumerate(zip(images, boxes, masks)):
         box = np.asarray(box, np.float32)
@@ -269,13 +273,14 @@ def prepare_input(selected, args, temporary_dir):
 
 
 def contact_colors(probabilities, side, mode="probability", threshold=0.5):
+    # Saturated side colors keep the mesh distinct from skin and scene points.
+    base = np.array((0, 255, 255) if side == 0 else (255, 40, 230), dtype=np.uint8)
     if probabilities is None or mode == "off":
-        color = (80, 185, 225) if side == 0 else (195, 145, 220)
-        return np.tile(np.array(color, np.uint8), (778, 1))
+        return np.tile(base, (778, 1))
     probability = np.clip(np.nan_to_num(np.asarray(probabilities), nan=0.0), 0, 1)
     if mode == "binary":
         probability = (probability >= threshold).astype(np.float32)
-    cold, hot = np.array([60, 150, 220]), np.array([245, 60, 65])
+    cold, hot = base.astype(np.float32), np.array([100, 255, 0])
     return np.round(cold + probability[:, None] * (hot - cold)).astype(np.uint8)
 
 
@@ -367,7 +372,8 @@ def save_results(frames, faces, args, info, fps):
     folder = Path(args.output_dir)
     folder.mkdir(parents=True, exist_ok=True)
     metadata = dict(info, arguments=vars(args), num_frames=len(frames), fps=fps,
-                    hand_order=["right", "left"], contact_colors="blue=low, red=high",
+                    hand_order=["right", "left"],
+                    contact_colors="right=bright cyan, left=bright magenta, contact=neon green",
                     source_frame_indices=[int(f["source_frame_index"]) for f in frames],
                     intrinsics_source=(info["intrinsics_source"] if args.results_dir else
                                        "annotation" if args.hand_source == "annotations" else "estimated"))

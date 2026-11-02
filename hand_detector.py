@@ -251,7 +251,7 @@ def parse_tracks(
     img_h=384,
     img_w=512,
     aspect_ratio=3/4,
-    padding=0.30,
+    padding=0.25,
     max_gap=5,
     smooth_window=3,
 ):
@@ -330,7 +330,7 @@ def parse_tracks(
 
 
 
-def get_bbox_from_kps(input_bbox, img_h=384, img_w=512, aspect_ratio=3/4, padding=0.3):
+def get_bbox_from_kps(input_bbox, img_h=384, img_w=512, aspect_ratio=3/4, padding=0.25):
     """
     Get bounding box from 2D keypoints with fixed aspect ratio w:h = 3:4
     Maintains aspect ratio even when clamped to image boundaries.

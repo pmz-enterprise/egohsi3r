@@ -357,9 +357,9 @@ class ViT(nn.Module):
             # since the first element for pos embed (sin-cos manner) is zero, it will cause no difference
             x = x + self.pos_embed[:, 1:] + self.pos_embed[:, :1]
         # X [B, 192, 1280]
-        # 这里有广播操作，所以可以相加
+
         # x cat [ mean_pose, mean_shape, mean_cam] tokens 
-        # 16*6的表征
+
         pose_tokens  = self.pose_emb(self.init_hand_pose.reshape(1, 16, 6)).repeat(B, 1, 1)
         shape_tokens = self.shape_emb(self.init_betas).unsqueeze(1).repeat(B, 1, 1)
         cam_tokens   = self.cam_emb(self.init_cam).unsqueeze(1).repeat(B, 1, 1)
@@ -380,7 +380,7 @@ class ViT(nn.Module):
                 x = blk(x)
 
         x = self.last_norm(x)
-        # # NUM_HAND_JOINTS本身是15，加上全局朝向的1个，共16个，每个6维
+
         # pose_feat  = x[:, :16]
         # shape_feat = x[:, 16: 17]
         # cam_feat   = x[:, 17: 18]
