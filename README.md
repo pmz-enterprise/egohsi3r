@@ -63,21 +63,6 @@ Replay saved results:
 python infer.py --results_dir outputs/demos/demo --port 8081
 ```
 
-Use `--no_viewer` for headless execution. See `python infer.py --help` for options.
-Hand meshes use bright cyan (right) and bright magenta (left). Contact defaults
-to `binary`: vertices at or above the threshold (default `0.5`) turn neon green.
-`probability` blends the side color toward neon green as probability increases;
-`off` shows solid side colors and hides contact markers.
-
-In **Hands / Contact**, neon green **Contact markers** emphasize current-frame contact
-vertices. **Contact on RGB** projects the
-same vertices onto the input image, including the occluded side of the hand.
-The readout shows counts and maximum probabilities for each hand. **Next contact**
-jumps to the next frame with a vertex above the selected threshold. These are
-model predictions on hand vertices, not measured object contact or contact force.
-Use `--bbox_padding` to adjust the margin around detected hands (default: `0.25`
-per side, giving 1.5× width and height before aspect-ratio and boundary adjustment).
-
 ## Acknowledgements
 
 Built on [CUT3R](https://github.com/CUT3R/CUT3R),
