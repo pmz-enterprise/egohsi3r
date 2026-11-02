@@ -1,6 +1,7 @@
 <h1 align="center">EgoHSI3R: Online 4D Hand-Scene Interaction Reconstruction from Egocentric Video</h1>
 
 <p align="center">
+  <a href="https://pmz-enterprise.github.io/egohsi3r-page/"><img src="https://img.shields.io/badge/Project-Page-2471a3" alt="Project Page"></a>
   <a href="https://arxiv.org/abs/2610.40832"><img src="https://img.shields.io/badge/Paper-arXiv-b31b1b" alt="Paper"></a>
   <a href="https://www.modelscope.cn/models/QwenMaxPreview/egohsi3r"><img src="https://img.shields.io/badge/Weights-ModelScope-624aff" alt="Model weights"></a>
 </p>
